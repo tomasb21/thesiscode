@@ -5,7 +5,7 @@ library(pROC)
 library(MLmetrics)
 library(glassoFast)
 
-load("C:/Users/tomas/Desktop/Github/tese/glioma-RNASeq-2021-classification.RData")
+load("C:/Users/tomas/Desktop/Github/tese/glioma-RNASeq-2021-classification.RData") #too big to upload to github
 
 astro_RNA$y <- 1
 gbm_RNA$y <- 2
@@ -430,3 +430,4 @@ res_summary_cm_gl_W <- apply(results_cm_gl_W, 2, function(v) c(mean=mean(v), sd=
 res_summary_cm_gl_W_al <- apply(results_cm_gl_W_al, 2, function(v) c(mean=mean(v), sd=sd(v)))
 res_summary_cm_gl_wi <- apply(results_cm_gl_wi, 2, function(v) c(mean=mean(v), sd=sd(v)))
 res_summary_cm_gl_wi_al <- apply(results_cm_gl_wi_al, 2, function(v) c(mean=mean(v), sd=sd(v)))
+
