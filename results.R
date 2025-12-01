@@ -10,9 +10,9 @@ load("C:/Users/tomas/Desktop/Github/tese/glioma-RNASeq-2021-classification.RData
 astro_RNA$y <- 1
 gbm_RNA$y <- 2
 oligo_RNA$y <- 3
-# Merge datasets
+
 data <- rbind(astro_RNA, gbm_RNA, oligo_RNA)
-# Response and predictors
+
 y <- as.factor(data$y)
 x <- as.matrix(subset(data, select = -c(names, sample.type, y)))
 
@@ -39,15 +39,14 @@ build_W_from_cor <- function(X, cap = 0.95) {
   R <- pmin(pmax(R, -cap), cap)
   
   denom <- 1 - R^2
-  
-  # Off-diagonal entries: -2 * rho / (1 - rho^2)
+
   W <- -2 * R / denom
-  diag(W) <- 0  # clear diagonals for now
+  diag(W) <- 0  # clear diagonals
   
-  # Diagonal entries: 2 * sum_{s!=i} 1 / (1 - rho_{is}^2)
+  # Diagonal entries
   diag(W) <- 2 * (rowSums(1 / denom) - 1 / diag(denom))
   
-  return(W)  # ensure W is returned as a matrix
+  return(W)  
 }
 
 inv_sqrt_W <- function(W, tau = 1e-3) {
@@ -55,7 +54,7 @@ inv_sqrt_W <- function(W, tau = 1e-3) {
   e <- eigen(Wreg, symmetric = TRUE) #eigen takes too long for all the data
   d <- pmax(e$values, 1e-10)
   Wi2 <- e$vectors %*% diag(1 / sqrt(d)) %*% t(e$vectors)
-  dimnames(Wi2) <- dimnames(W)   # <-- preserve feature names
+  dimnames(Wi2) <- dimnames(W)   # used to preserve feature names
   
   return(Wi2)
 }
@@ -103,13 +102,13 @@ for (rep in 1:n_reps) {
   astro_RNA$y <- 1
   gbm_RNA$y <- 2
   oligo_RNA$y <- 3
-  # Merge datasets
+
   data <- rbind(astro_RNA, gbm_RNA, oligo_RNA)
-  # Response and predictors
+
   y <- as.factor(data$y)
   x <- as.matrix(subset(data, select = -c(names, sample.type, y)))
   
-  # Train/Test Split
+  # Split into train and test, 80/20 ratio
   id_tr  <- createDataPartition(y, p = 0.8, list = FALSE)
   Xtr_raw <-x[id_tr, , drop = FALSE]
   Xte_raw <- x[-id_tr, , drop = FALSE]
@@ -119,9 +118,9 @@ for (rep in 1:n_reps) {
   set.seed(rep)  # ensures reproducibility
   foldid <- sample(rep(1:10, length.out = length(y_tr)))  # 10-fold CV
   
-  nzv <- nearZeroVar(Xtr_raw)                   # detect
-  Xtr_raw_filtered <- Xtr_raw[, -nzv]           # remove
-  Xte_raw_filtered <- Xte_raw[, -nzv]
+  nzv <- nearZeroVar(Xtr_raw)                   # detect nzv
+  Xtr_raw_filtered <- Xtr_raw[, -nzv]           # remove nzv from train
+  Xte_raw_filtered <- Xte_raw[, -nzv]           # remove nzv from test
   
   # Standardize
   mu  <- colMeans(Xtr_raw_filtered)
@@ -129,7 +128,7 @@ for (rep in 1:n_reps) {
   Xtr <- scale(Xtr_raw_filtered, center = mu, scale = sdv)
   Xte <- scale(Xte_raw_filtered, center = mu, scale = sdv)
   
-  #Lasso
+  # LASSO
   duration_lasso<-as.numeric(system.time(fit_lasso <- pampam::cv.glmnet(
     Xtr, y_tr, family = "multinomial",
     type.measure = "class", standardize = FALSE,
@@ -147,7 +146,7 @@ for (rep in 1:n_reps) {
   nz_l <- as.matrix(coeffs_l[rowSums(abs(coeffs_l)) != 0, , drop = FALSE])
   nz_l_n <- nrow(nz_l)
   
-  #Ridge
+  # Ridge
   duration_ridge<-as.numeric(system.time(fit_ridge <- pampam::cv.glmnet(
     Xtr, y_tr, family = "multinomial",
     type.measure = "class", standardize = FALSE,
@@ -165,7 +164,7 @@ for (rep in 1:n_reps) {
   nz_r <- as.matrix(coeffs_r[rowSums(abs(coeffs_r)) != 0, , drop = FALSE])
   nz_r_n <- nrow(nz_r)
   
-  #Adaptive LASSO
+  # Adaptive LASSO
   weights <- 1 / abs(coeffs_r)
   weights <- pmin(weights, quantile(weights, 0.95))
   
@@ -192,7 +191,7 @@ for (rep in 1:n_reps) {
     Xtr, y_tr, family = "multinomial",
     type.measure = "class", standardize = FALSE,
     alpha = 0.13, foldid = foldid))[3])
-
+  
   pred_enet_te <- predict(fit_elastic, Xte, s="lambda.min", type="class")
   pred_enet_tr <- predict(fit_elastic, Xtr, s="lambda.min", type="class")
   acc_enet_te <- acc(pred_enet_te, y_te)
@@ -208,13 +207,13 @@ for (rep in 1:n_reps) {
   
   Xtr_reduced <- Xtr[, nz_enet_names, drop = FALSE]
   Xte_reduced <- Xte[, nz_enet_names, drop = FALSE]
-
+  
   # Elastic Net + Correlation-Based
   W    <- build_W_from_cor(Xtr_reduced)
   Wi2  <- inv_sqrt_W(W)
   XtrS <- Xtr_reduced %*% Wi2
   XteS <- Xte_reduced %*% Wi2
-
+  
   duration_c<-as.numeric(system.time(fit_corr <- pampam::cv.glmnet(
     XtrS, y_tr, family="multinomial", 
     type.measure = "class", standardize = FALSE,
@@ -280,7 +279,7 @@ for (rep in 1:n_reps) {
   Xtr_reduced <- scale(Xtr_reduced, center = mu, scale = sdv)
   Xte_reduced <- scale(Xte_reduced, center = mu, scale = sdv)
   
-  #Graphical Lasso + Correlation_wi
+  # Graphical Lasso + Correlation_wi
   Wi2  <- inv_sqrt_W(wi_sub)
   XtrS_raw <- Xtr_reduced %*% Wi2
   XteS_raw <- Xte_reduced %*% Wi2
@@ -305,7 +304,7 @@ for (rep in 1:n_reps) {
   coeffs_gl_wi <- Wi2%*%fit_to_coefmatrix(fit_gl_wi, fit_gl_wi$lambda.min)[-1, , drop = FALSE]
   nz_gl_wi_n <- nrow(coeffs_gl_wi)
   
-  #Graphical Lasso + Correlation_wi + Adaptive
+  # Graphical Lasso + Correlation_wi + Adaptive
   weights <- 1 / (abs(coeffs_gl_wi) + 1e-8)
   weights <- pmin(weights, quantile(weights, 0.95))
   
@@ -326,7 +325,7 @@ for (rep in 1:n_reps) {
   nz_gl_wi_al_n <- nrow(nz_gl_wi_al)
   
   
-  #Graphical Lasso + Correlation_W
+  # Graphical Lasso + Correlation_W
   W <- build_W_from_cor(Xtr_reduced)
   Wi2  <- inv_sqrt_W(W)
   XtrS_raw <- Xtr_reduced %*% Wi2
@@ -352,7 +351,7 @@ for (rep in 1:n_reps) {
   coeffs_gl_W <- Wi2%*%fit_to_coefmatrix(fit_gl_W, fit_gl_W$lambda.min)[-1, , drop = FALSE]
   nz_gl_W_n <- nrow(coeffs_gl_W)
   
-  #Graphical Lasso + Correlation_W + Adaptive
+  # Graphical Lasso + Correlation_W + Adaptive
   weights <- 1 / (abs(coeffs_gl_W) + 1e-8)
   weights <- pmin(weights, quantile(weights, 0.95))
   
@@ -384,7 +383,7 @@ for (rep in 1:n_reps) {
                                      cov_duration+graph_duration+wi_duration+duration_gl_W+duration_gl_W_al,
                                      cov_duration+graph_duration+wi_duration+duration_gl_wi,
                                      cov_duration+graph_duration+wi_duration+duration_gl_wi+duration_gl_wi_al) #Duration (s)
-
+  
   results_cm_l[rep, ] <- cm_l
   results_cm_r[rep, ] <- cm_r
   results_cm_al[rep, ] <- cm_al
@@ -411,92 +410,23 @@ for (rep in 1:n_reps) {
   if (rep %% 1 == 0) cat(rep, "done\n")
 }
 
-# --- Summarize ---
-res_summary_te <- apply(results_te, 2, function(v) c(mean=mean(v), sd=sd(v)))
-res_summary_tr <- apply(results_tr, 2, function(v) c(mean=mean(v), sd=sd(v)))
-res_summary_n_zero <- apply(results_n_zero, 2, function(v) c(mean=mean(v), sd=sd(v)))
-res_summary_auc <- apply(results_auc, 2, function(v) c(mean=mean(v), sd=sd(v)))
-res_summary_f1 <- apply(results_f1, 2, function(v) c(mean=mean(v), sd=sd(v)))
-res_summary_duration <- apply(results_duration, 2, function(v) c(mean=mean(v), sd=sd(v)))
-res_summary_duration_total <- apply(results_duration_total, 2, function(v) c(mean=mean(v), sd=sd(v)))
+# Metrics
+res_summary_te <- apply(results_te, 2, function(v) c(mean=mean(v), sd=sd(v))) #test
+res_summary_tr <- apply(results_tr, 2, function(v) c(mean=mean(v), sd=sd(v))) #train
+res_summary_n_zero <- apply(results_n_zero, 2, function(v) c(mean=mean(v), sd=sd(v))) #number of non_zero coefficients
+res_summary_auc <- apply(results_auc, 2, function(v) c(mean=mean(v), sd=sd(v))) #auc
+res_summary_f1 <- apply(results_f1, 2, function(v) c(mean=mean(v), sd=sd(v))) #f1
+res_summary_duration <- apply(results_duration, 2, function(v) c(mean=mean(v), sd=sd(v))) #duration
+res_summary_duration_total <- apply(results_duration_total, 2, function(v) c(mean=mean(v), sd=sd(v))) #total duration
 
-res_summary_cm_l <- apply(results_cm_l, 2, function(v) c(mean=mean(v), sd=sd(v)))
-res_summary_cm_r <- apply(results_cm_r, 2, function(v) c(mean=mean(v), sd=sd(v)))
-res_summary_cm_al <- apply(results_cm_al, 2, function(v) c(mean=mean(v), sd=sd(v)))
-res_summary_cm_enet <- apply(results_cm_enet, 2, function(v) c(mean=mean(v), sd=sd(v)))
-res_summary_cm_c <- apply(results_cm_c, 2, function(v) c(mean=mean(v), sd=sd(v)))
-res_summary_cm_c_al <- apply(results_cm_c_al, 2, function(v) c(mean=mean(v), sd=sd(v)))
-res_summary_cm_gl_W <- apply(results_cm_gl_W, 2, function(v) c(mean=mean(v), sd=sd(v)))
+# Confusion Matrices                                   
+res_summary_cm_l <- apply(results_cm_l, 2, function(v) c(mean=mean(v), sd=sd(v))) 
+res_summary_cm_r <- apply(results_cm_r, 2, function(v) c(mean=mean(v), sd=sd(v))) 
+res_summary_cm_al <- apply(results_cm_al, 2, function(v) c(mean=mean(v), sd=sd(v))) 
+res_summary_cm_enet <- apply(results_cm_enet, 2, function(v) c(mean=mean(v), sd=sd(v))) 
+res_summary_cm_c <- apply(results_cm_c, 2, function(v) c(mean=mean(v), sd=sd(v))) 
+res_summary_cm_c_al <- apply(results_cm_c_al, 2, function(v) c(mean=mean(v), sd=sd(v))) 
+res_summary_cm_gl_W <- apply(results_cm_gl_W, 2, function(v) c(mean=mean(v), sd=sd(v))) 
 res_summary_cm_gl_W_al <- apply(results_cm_gl_W_al, 2, function(v) c(mean=mean(v), sd=sd(v)))
 res_summary_cm_gl_wi <- apply(results_cm_gl_wi, 2, function(v) c(mean=mean(v), sd=sd(v)))
 res_summary_cm_gl_wi_al <- apply(results_cm_gl_wi_al, 2, function(v) c(mean=mean(v), sd=sd(v)))
-
-setwd("C:/Users/tomas/Desktop/NÃO APAGAR/results/new correlation")
-
-saveRDS(res_summary_te, "res_summary_te.rds")
-saveRDS(res_summary_tr, "res_summary_tr.rds")
-saveRDS(res_summary_n_zero, "res_summary_n_zero.rds")
-saveRDS(res_summary_auc, "res_summary_auc.rds")
-saveRDS(res_summary_f1, "res_summary_f1.rds")
-saveRDS(res_summary_duration, "res_summary_duration.rds")
-saveRDS(res_summary_duration_total, "res_summary_duration_total.rds")
-
-saveRDS(results_te, "results_te.rds")
-saveRDS(results_tr, "results_tr.rds")
-saveRDS(results_n_zero, "results_n_zero.rds")
-saveRDS(results_auc, "results_auc.rds")
-saveRDS(results_f1, "results_f1.rds")
-saveRDS(results_duration, "results_duration.rds")
-saveRDS(results_duration_total, "results_duration_total.rds")
-
-saveRDS(res_summary_cm_l, "res_summary_cm_l.rds")
-saveRDS(res_summary_cm_r, "res_summary_cm_r.rds")
-saveRDS(res_summary_cm_al, "res_summary_cm_al.rds")
-saveRDS(res_summary_cm_enet, "res_summary_cm_enet.rds")
-saveRDS(res_summary_cm_c, "res_summary_cm_c.rds")
-saveRDS(res_summary_cm_c_al, "res_summary_cm_c_al.rds")
-saveRDS(res_summary_cm_gl_W, "res_summary_cm_gl_W.rds")
-saveRDS(res_summary_cm_gl_W_al, "res_summary_cm_gl_W_al.rds")
-saveRDS(res_summary_cm_gl_wi, "res_summary_cm_gl_wi.rds")
-saveRDS(res_summary_cm_gl_wi_al, "res_summary_cm_gl_wi_al.rds")
-
-saveRDS(results_cm_l, "results_cm_l.rds")
-saveRDS(results_cm_r, "results_cm_r.rds")
-saveRDS(results_cm_al, "results_cm_al.rds")
-saveRDS(results_cm_enet, "results_cm_enet.rds")
-saveRDS(results_cm_c, "results_cm_c.rds")
-saveRDS(results_cm_c_al, "results_cm_c_al.rds")
-saveRDS(results_cm_gl_W, "results_cm_gl_W.rds")
-saveRDS(results_cm_gl_W_al, "results_cm_gl_W_al.rds")
-saveRDS(results_cm_gl_wi, "results_cm_gl_wi.rds")
-saveRDS(results_cm_gl_wi_al, "results_cm_gl_wi_al.rds")
-  
-  
-print(round(res_summary_te,4))
-print(round(res_summary_tr,4))
-print(round(res_summary_auc,4))
-print(round(res_summary_f1,4))
-print(round(res_summary_duration,4))
-print(round(res_summary_n_zero,4))
-print(round(res_summary_duration_total,4))
-
-# Put all objects into a list
-summaries <- list(
-  TestError   = res_summary_te,
-  TrainError  = res_summary_tr,
-  AUC         = res_summary_auc,
-  F1          = res_summary_f1,
-  Duration    = res_summary_duration_total,
-  N_zero      = res_summary_n_zero
-)
-
-# Extract the "Lasso" column from each and combine
-lasso_metrics <- sapply(summaries, function(x) x[ , "Glasso&Corwi&Adaptive"])
-
-# If you also want rownames (mean, sd) preserved:
-lasso_metrics <- do.call(cbind, lapply(summaries, function(x) x[, "Glasso&Corwi&Adaptive", drop=FALSE]))
-colnames(lasso_metrics) <- names(summaries)
-
-print(round(lasso_metrics, 4))
-
-    
